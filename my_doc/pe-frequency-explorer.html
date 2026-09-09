@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>位置编码频率探索器 PE(pos, 2i) = sin(pos / 10000^(2i/d))</title>
+<style>
+  :root { color-scheme: light; }
+  [data-theme="dark"] { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; }
+  .viz-root {
+    --surface-1: #fcfcfb;
+    --page:      #f9f9f7;
+    --ink-1:     #0b0b0b;
+    --ink-2:     #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --axis:      #c3c2b7;
+    --ring:      rgba(11,11,11,0.10);
+    --s1:        #2a78d6;   /* sin  曲线 */
+    --s2:        #eb6834;   /* cos  曲线 */
+    background: var(--surface-1);
+    color: var(--ink-1);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 980px; margin: 0 auto; padding: 24px 20px 48px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root:where(:not([data-theme="light"])) {
+      --surface-1: #1a1a19; --page: #0d0d0d;
+      --ink-1: #ffffff;     --ink-2: #c3c2b7;
+      --muted: #898781;     --grid: #2c2c2a;
+      --axis: #383835;      --ring: rgba(255,255,255,0.10);
+      --s1: #3987e5;        --s2: #d95926;
+    }
+  }
+  [data-theme="dark"] .viz-root {
+    --surface-1: #1a1a19; --page: #0d0d0d;
+    --ink-1: #ffffff;     --ink-2: #c3c2b7;
+    --muted: #898781;     --grid: #2c2c2a;
+    --axis: #383835;      --ring: rgba(255,255,255,0.10);
+    --s1: #3987e5;        --s2: #d95926;
+  }
+
+  h1 { font-size: 21px; margin: 0 0 4px; font-weight: 650; }
+  .sub { color: var(--ink-2); font-size: 14px; margin-bottom: 14px; }
+  .formula {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    background: var(--page); border: 1px solid var(--ring);
+    border-radius: 8px; padding: 10px 14px; margin: 10px 0 16px;
+    font-size: 14.5px;
+  }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-end;
+              margin: 6px 0 4px; }
+  .ctl { min-width: 230px; }
+  .ctl label { display: flex; justify-content: space-between; font-size: 13px;
+               color: var(--ink-2); margin-bottom: 2px; }
+  .ctl output { color: var(--ink-1); font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--s1); }
+
+  figure { margin: 14px 0 4px; }
+  canvas { width: 100%; height: auto; display: block; background: var(--surface-1);
+           border: 1px solid var(--ring); border-radius: 10px; }
+
+  .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+             gap: 8px; margin: 14px 0 4px; }
+  .card { background: var(--page); border: 1px solid var(--ring); border-radius: 8px;
+          padding: 8px 12px; font-size: 13.5px; }
+  .card b { display: block; color: var(--ink-2); font-weight: 500; font-size: 12px;
+            margin-bottom: 2px; }
+  .card span { font-variant-numeric: tabular-nums; }
+
+  .legend { display: flex; gap: 18px; margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+  .lg { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+
+  .note { color: var(--ink-2); font-size: 13px; margin-top: 12px;
+          border-top: 1px solid var(--ring); padding-top: 10px; }
+  #themeBtn { position: absolute; right: 16px; top: 16px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <button id="themeBtn">深色 / 浅色</button>
+  <h1>位置编码频率探索器</h1>
+  <div class="sub">拖动 <b>位置 pos</b> 与 <b>频率对 i</b>,看同一个 token 的相位与波形怎么变(d_model = 256,共 128 个频率对)。</div>
+
+  <div class="formula" id="formula">
+    θ = 1 / 10000<sup>2i/256</sup> &nbsp;·&nbsp; 相位 = θ × pos
+  </div>
+
+  <div class="controls">
+    <div class="ctl">
+      <label>pos(位置,第几个词)<output id="outPos">10</output></label>
+      <input type="range" id="slPos" min="0" max="51" step="1" value="10">
+    </div>
+    <div class="ctl">
+      <label>i(频率对 0–127)<output id="outI">3</output></label>
+      <input type="range" id="slI" min="0" max="127" step="1" value="3">
+    </div>
+    <div class="ctl">
+      <label>视野(横轴显示到第几个位置)<output id="outView">52</output></label>
+      <input type="range" id="slView" min="0" max="4" step="1" value="0">
+    </div>
+  </div>
+
+  <figure>
+    <canvas id="cv"></canvas>
+  </figure>
+  <div class="legend">
+    <span class="lg"><span class="sw" style="background:var(--s1)"></span>sin(θ·x)&nbsp;(偶数列)</span>
+    <span class="lg"><span class="sw" style="background:var(--s2)"></span>cos(θ·x)&nbsp;(奇数列)</span>
+    <span class="lg"><span class="sw" style="background:var(--muted)"></span>淡线:其他频率(i = 0, 8, 16, …)作参照</span>
+  </div>
+
+  <div class="readout">
+    <div class="card"><b>频率 θ</b><span id="rTheta">–</span></div>
+    <div class="card"><b>一个完整周期</b><span id="rPeriod">–</span></div>
+    <div class="card"><b>pos=… 处的相位 θ×pos</b><span id="rPhase">–</span></div>
+    <div class="card"><b>该点取值</b><span id="rVal">–</span></div>
+    <div class="card"><b>句子只有 52 步时</b><span id="rNote">–</span></div>
+  </div>
+
+  <div class="note" id="ctxNote"></div>
+</div>
+
+<script>
+(() => {
+  const D = 256;              // d_model
+  const MAXI = 127;           // 频率对 0..127
+  const SEQ = 52;             // 项目最长句子
+  const views = [52, 520, 5200, 52000, 520000];
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+
+  const $ = id => document.getElementById(id);
+  const slPos=$('slPos'), slI=$('slI'), slView=$('slView');
+  const fmt = (v, g=4) => {
+    if (v === 0) return '0';
+    const a = Math.abs(v);
+    if (a >= 1e5 || a < 1e-4) return v.toExponential(3);
+    return +v.toPrecision(g) + '';
+  };
+
+  function theme() {
+    const r = document.querySelector('.viz-root').closest('.viz-root');
+    const cur = document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme =
+      (cur === 'dark' || (cur !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches))
+        ? 'light' : 'dark';
+  }
+  $('themeBtn').addEventListener('click', theme);
+  if (matchMedia('(prefers-color-scheme: dark)').matches)
+    document.documentElement.dataset.theme = 'dark';
+
+  function css(v){ return getComputedStyle(document.querySelector('.viz-root')).getPropertyValue(v).trim(); }
+
+  const theta = i => Math.pow(10000, -2*i/D);   // 每步弧度
+  const PAD = {l:46, r:14, t:12, b:34};
+
+  function draw() {
+    const pos = +slPos.value, i = +slI.value;
+    const view = views[+slView.value];
+    $('outPos').textContent = pos;
+    $('outI').textContent = i;
+    $('outView').textContent = fmt(view);
+
+    // 读数
+    const th = theta(i), phase = th*pos, per = 2*Math.PI/th;
+    $('rTheta').textContent = `θ = 10^(−${2*i}/256) = ${fmt(th)}  弧度/步`;
+    $('rPeriod').textContent = `2π/θ ≈ ${fmt(per)} 步`;
+    $('rPhase').textContent = `θ×pos = ${fmt(th)}×${pos} = ${fmt(phase)} 弧度`;
+    $('rVal').textContent = `sin = ${fmt(Math.sin(phase))},  cos = ${fmt(Math.cos(phase))}`;
+    $('rNote').textContent = per >= 5000 ? `周期远大于 52:52 步内走不到 1/100 个周期,几乎不变——低频列量长距` :
+                              (per < 10 ? `周期 < 10 步:52 步内走完 ${(SEQ/per).toFixed(1)} 个周期——高频列量近距,但会重复(别名)` :
+                              `52 步内约走 ${(SEQ/per).toFixed(2)} 个周期`);
+    $('ctxNote').innerHTML = `这是第 <b>${i}</b> 个频率对:它负责 PE 矩阵的维度 <b>${2*i}</b>(sin)和 <b>${2*i+1}</b>(cos)。
+      拖 i 看波形变疏密;拖 pos 看取值沿波形的移动。pos 从 <b>0</b> 开始计数(pos=0 是第一个词,相位 0)。`;
+
+    // canvas 尺寸
+    const W = cv.clientWidth || 900;
+    const H = Math.max(300, Math.round(W*0.36));
+    const dpr = devicePixelRatio || 1;
+    cv.width = W*dpr; cv.height = H*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,W,H);
+
+    const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+    const X = x => PAD.l + x/view*pw;
+    const Y = y => PAD.t + (1 - (y+1)/2)*ph;
+
+    // 淡影:其他频率(i = 0,8,16,...,120)的 sin 波形
+    ctx.lineWidth = 1;
+    for (let j=0; j<=120; j+=8) {
+      if (j === i) continue;
+      const t = theta(j);
+      ctx.strokeStyle = css('--grid');
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      for (let px=0; px<=pw; px+=2) {
+        const x = px/pw*view, y = Math.sin(t*x);
+        px ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y));
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // 网格 + 轴
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, Y(0)); ctx.lineTo(PAD.l+pw, Y(0));   // y=0 基线
+    ctx.stroke();
+    ctx.fillStyle = css('--muted'); ctx.font = '11px system-ui, sans-serif';
+    // 刻度间隔:取 ≥ view/10 的最小"友好步长"(1/2/5 × 10^n),保证 6~12 个刻度
+    const target = view / 10;
+    const mag = Math.pow(10, Math.floor(Math.log10(target)));
+    let tick = mag;
+    for (const m of [1, 2, 5, 10]) { if (m * mag >= target) { tick = m * mag; break; } }
+    ctx.textAlign = 'center';
+    for (let x = 0; x <= view + 1e-9; x += tick) {
+      ctx.beginPath(); ctx.moveTo(X(x), PAD.t); ctx.lineTo(X(x), PAD.t + ph); ctx.stroke();
+      ctx.fillText(x >= 10000 ? fmt(x) : x + '', X(x), H - 10);
+    }
+    ctx.textAlign = 'right';
+    ctx.fillText('-1', PAD.l - 7, Y(-1) + 4); ctx.fillText('0', PAD.l - 7, Y(0) + 4);
+    ctx.fillText('1', PAD.l - 7, Y(1) + 4);
+
+    // sin / cos 波形
+    const series = [
+      {th, col: css('--s1'), f: Math.sin},
+      {th, col: css('--s2'), f: Math.cos},
+    ];
+    for (const s of series) {
+      ctx.strokeStyle = s.col; ctx.lineWidth = 2.2; ctx.beginPath();
+      for (let px=0; px<=pw; px+=1) {
+        const x = px/pw*view, y = s.f(s.th*x);
+        px ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y));
+      }
+      ctx.stroke();
+    }
+
+    // pos 竖线 + 交点
+    ctx.strokeStyle = css('--ink-2'); ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(X(pos), PAD.t); ctx.lineTo(X(pos), PAD.t+ph); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = css('--muted'); ctx.textAlign = 'center';
+    ctx.fillText('pos='+pos, X(pos), H-24);
+
+    for (const s of series) {
+      const y = s.f(s.th*pos);
+      ctx.beginPath();
+      ctx.arc(X(pos), Y(y), 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = s.col; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = css('--surface-1'); ctx.stroke();
+    }
+  }
+
+  for (const el of [slPos, slI, slView]) el.addEventListener('input', draw);
+  addEventListener('resize', draw);
+  draw();
+})();
+</script>
+</body>
+</html>
