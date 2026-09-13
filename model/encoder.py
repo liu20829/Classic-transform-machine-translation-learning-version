@@ -53,8 +53,8 @@ class TransformerEncoderLayer(nn.Module):
 # ########################################################################
 class TransformerEncoder(nn.Module):
 	def __init__(self,
-	             src_vocab_size,
-	             dim_model,
+	             src_vocab_size,#嵌入矩阵大小
+	             dim_model,#token维度大小
 	             num_layers : int = 6,
 	             num_heads : int = 8,
 	             dim_feedforward : int = 2048,
@@ -67,6 +67,7 @@ class TransformerEncoder(nn.Module):
 
 		self.word_embedding = nn.Embedding(src_vocab_size, dim_model)
 		# Rescalling coefficient for word embedding
+		# 根号下的dim
 		self.coefficient = torch.sqrt(torch.FloatTensor([self.dim_model])).to(device)
 		self.position_encoding = PositionEncoding()
 
