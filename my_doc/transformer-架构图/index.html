@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer 编码器/解码器 - 交互式结构图</title>
+    <link rel="stylesheet" href="assets/flowchart.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>Transformer 编码器/解码器 交互式结构图</h1>
+        <p>单击节点跳转右侧说明 | 双击虚线节点展开子图（编码器层 / 解码器层 / 缩放点积注意力内部）</p>
+    </div>
+
+    <div class="container">
+        <div class="flowchart-panel" id="leftPanel">
+            <div id="flowNav">
+                <button class="back-btn" id="backBtn" onclick="showMain()">&larr; 返回总览</button>
+                <h2 class="panel-title" id="flowTitle">总览：从 src 到输出概率</h2>
+            </div>
+            <div class="toolbar">
+                <button class="tool-btn" id="btnZoom" onclick="setMode('zoom')">&#128269; 缩放</button>
+                <button class="tool-btn active" id="btnDrag" onclick="setMode('drag')">&#9995; 拖动</button>
+                <button class="tool-btn" id="btnReset" onclick="resetView()">&#8634; 重置</button>
+            </div>
+
+            <!-- ===== 总览图 ===== -->
+            <div class="mermaid-container" id="mainFlow">
+                <div class="mermaid">
+flowchart TD
+    A["输入 src 和 tgt<br/>【batch, len】"] --> B["词嵌入 加 位置编码<br/>乘 sqrt_d_model<br/>【batch, len, d_model】"]
+    B --> C["编码器层 x 6<br/>自注意力 Q K V 同源<br/>【batch, len, d_model】"]
+    C --> D["编码器输出 encoded_input"]
+    D --> E["解码器层 x 6<br/>三种注意力都在这里<br/>【batch, len_tgt, d_model】"]
+    B --> E
+    E --> F["Linear 全连接<br/>【batch, len_tgt, vocab】"]
+    F --> G["Softmax 输出概率"]
+    C -.-> H["缩放点积注意力 内部<br/>q k v 形状流转与 mask"]
+    E -.-> H
+    style A fill:#cc785c,stroke:#a9583e,color:#fff
+    style G fill:#cc785c,stroke:#a9583e,color:#fff
+    style B fill:#5db8a6,stroke:#3d9a88,color:#fff
+    style D fill:#5db8a6,stroke:#3d9a88,color:#fff
+    style F fill:#5db8a6,stroke:#3d9a88,color:#fff
+    style C fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style E fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style H fill:#c64545,stroke:#a53535,color:#fff
+                </div>
+            </div>
+
+            <!-- ===== 子图 1：编码器层内部 ===== -->
+            <div id="subEncoder" style="display:none">
+                <p class="sub-title" id="subEncoderTitle">编码器层内部（TransformerEncoderLayer）</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+flowchart TD
+    E1["输入 src 和 src_mask"] --> E2["多头自注意力<br/>Q K V 全部来自 src<br/>mask 只遮 padding"]
+    E2 --> E3["残差相加 加 层归一化<br/>norm1"]
+    E3 --> E4["前馈网络<br/>Linear 到 ff_size 到 Linear<br/>中间 ReLU 和 Dropout"]
+    E4 --> E5["残差相加 加 层归一化<br/>norm2"]
+    E5 --> E6["输出【batch, len, d_model】"]
+    style E1 fill:#cc785c,stroke:#a9583e,color:#fff
+    style E6 fill:#cc785c,stroke:#a9583e,color:#fff
+    style E2 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style E4 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style E3 fill:#5db8a6,stroke:#3d9a88,color:#fff
+    style E5 fill:#5db8a6,stroke:#3d9a88,color:#fff
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 子图 2：解码器层内部 ===== -->
+            <div id="subDecoder" style="display:none">
+                <p class="sub-title" id="subDecoderTitle">解码器层内部（三种注意力的分工）</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+flowchart TD
+    D1["输入 target 和 encoded_input"] --> D2["带掩码的多头自注意力<br/>Q K V 来自 target<br/>mask 等于 padding 与 下三角"]
+    D2 --> D3["残差相加 加 层归一化<br/>norm1"]
+    D3 --> D4["多头交叉注意力<br/>Q 来自解码器状态<br/>K V 来自编码器输出"]
+    D4 --> D5["残差相加 加 层归一化<br/>norm2"]
+    D5 --> D6["前馈网络"]
+    D6 --> D7["残差相加 加 层归一化<br/>norm3"]
+    style D1 fill:#cc785c,stroke:#a9583e,color:#fff
+    style D7 fill:#cc785c,stroke:#a9583e,color:#fff
+    style D2 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style D4 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style D6 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style D3 fill:#5db8a6,stroke:#3d9a88,color:#fff
+    style D5 fill:#5db8a6,stroke:#3d9a88,color:#fff
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 子图 3：缩放点积注意力内部 ===== -->
+            <div id="subAttn" style="display:none">
+                <p class="sub-title" id="subAttnTitle">缩放点积注意力内部（形状流转）</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+flowchart TD
+    S1["输入 q k v<br/>【N, H, len, D_k】"] --> S2["q 乘 k 的转置 再除 sqrt<br/>【N, H, len_q, len_k】"]
+    S2 --> S3["按 mask 屏蔽<br/>mask 等于 0 的位置填 -1e10"]
+    S3 --> S4["softmax 在最后一维<br/>【N, H, len_q, len_k】"]
+    S4 --> S5["与 v 矩阵乘 共享维是 len_k<br/>【N, H, len_q, D_k】"]
+    S5 --> S6["换轴 加 拼接<br/>【N, len_q, d_model】"]
+    S6 --> S7["输出投影 W_O<br/>【N, len_q, d_model】"]
+    style S1 fill:#cc785c,stroke:#a9583e,color:#fff
+    style S7 fill:#cc785c,stroke:#a9583e,color:#fff
+    style S3 fill:#c64545,stroke:#a53535,color:#fff
+    style S2 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style S5 fill:#e8a55a,stroke:#c88a3a,color:#fff
+    style S4 fill:#5db8a6,stroke:#3d9a88,color:#fff
+    style S6 fill:#5db8a6,stroke:#3d9a88,color:#fff
+                    </div>
+                </div>
+            </div>
+
+            <!-- 图例 -->
+            <div class="legend">
+                <h4>图例</h4>
+                <div class="legend-items">
+                    <div class="legend-item"><div class="legend-color" style="background:#cc785c"></div><span class="legend-text">输入/输出端点</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#5db8a6"></div><span class="legend-text">嵌入与形状处理</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#e8a55a"></div><span class="legend-text">网络层与注意力</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#c64545"></div><span class="legend-text">可展开的算子细节</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#cc785c;border:2px dashed #fff"></div><span class="legend-text">虚线=可双击展开</span></div>
+                </div>
+            </div>
+            <div class="zoom-info"><p>单击跳转说明 | 双击虚线节点展开子图</p></div>
+        </div>
+
+        <div class="resizer" id="resizer"></div>
+
+        <div class="detail-panel" id="detailPanel">
+            <!-- ===== 总览说明卡片 ===== -->
+            <div id="mainDetails">
+                <h2 class="panel-title">总览：从 src 到输出概率</h2>
+
+                <div class="detail-card">
+                    <h4>这份结构图怎么读</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>整条链路</label>
+                            <p>src 进编码器，编码器输出再喂给解码器的交叉注意力；tgt 自己走一遍解码器。形状全程保持【batch, len, d_model】，靠残差相加约束。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>三种注意力</label>
+                            <p>编码器里一个（普通自注意力），解码器里两个（带因果掩码的自注意力 + 交叉注意力）。三处用的是同一个类，只有喂进去的 Q K V 和 mask 不同。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>形状标注</label>
+                            <p>节点里的形状用【】全角括号（Mermaid 语法占用半角括号）。精确写法见右侧各卡片里的表格。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>与论文图的两处差异</label>
+                            <p>1) 本实现把缩放写成 sqrt_d_model，论文是 sqrt_d_k；2) 图上最后的 Softmax 在代码里是省略的，交给损失函数做。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section1">
+                    <div class="code-header" onclick="toggleSection('section1')">
+                        <h3>输入与两个掩码</h3>
+                        <span class="badge">model/transformer.py:27-46</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code># 源端掩码：只遮 padding
+def make_input_mask(self, input):
+    input_mask = (input != self.padding_index).unsqueeze(1).unsqueeze(2)
+    return input_mask
+
+# 目标端掩码：padding 与 下三角 的与
+def make_target_mask(self, target):
+    target_pad_mask = (target != self.padding_index).unsqueeze(1).unsqueeze(2)
+    target_tril_mask = torch.tril(torch.ones((target.shape[1], target.shape[1]),
+                                             device=self.device)).bool()
+    target_mask = target_pad_mask &amp; target_tril_mask
+    return target_mask
+
+def forward(self, src, tgt):
+    src_mask = self.make_input_mask(src)
+    encoded_input = self.encoder(src, src_mask)        # 编码器只吃 padding mask
+    target_mask = self.make_target_mask(tgt)
+    output, attention = self.decoder(tgt, encoded_input, target_mask, src_mask)
+    return output, attention</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section2">
+                    <div class="code-header" onclick="toggleSection('section2')">
+                        <h3>词嵌入 加 位置编码</h3>
+                        <span class="badge">model/encoder.py:87</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code># 词嵌入查表后乘 sqrt(dim_model)（论文 3.4 节要求），再加位置编码，最后过 dropout
+input_size = src.shape[1]   # 序列长度
+src = self.dropout((self.word_embedding(src) * self.coefficient)
+                   + self.position_encoding(input_size, self.dim_model, self.device))</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section3">
+                    <div class="code-header" onclick="toggleSection('section3')">
+                        <h3>编码器：N 层堆叠</h3>
+                        <span class="badge">model/encoder.py:76-91</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>encoding_layers = []
+for _ in range(num_layers):
+    encoding_layers.append(TransformerEncoderLayer(dim_model, num_heads,
+                                                   dim_feedforward, dropout, device))
+self.layers = nn.Sequential(*encoding_layers)
+
+def forward(self, src, mask):
+    input_size = src.shape[1]
+    src = self.dropout((self.word_embedding(src) * self.coefficient)
+                       + self.position_encoding(input_size, self.dim_model, self.device))
+    for layer in self.layers:
+        src = layer(src, mask)     # 同一个 mask 传进每一层
+    return src</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section4">
+                    <div class="code-header" onclick="toggleSection('section4')">
+                        <h3>编码器层：两个子层</h3>
+                        <span class="badge">model/encoder.py:39-47</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>def forward(self, src, mask):
+    # 自注意力：Q K V 传的都是同一个 src
+    attention, _ = self.attention(src, src, src, mask)
+    attention_norm = self.norm1(src + self.dropout(attention))
+
+    forward = self.feed_forward(attention_norm)
+    output = self.norm2(attention_norm + self.dropout(forward))
+    return output</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section5">
+                    <div class="code-header" onclick="toggleSection('section5')">
+                        <h3>解码器层：三种注意力的三次调用</h3>
+                        <span class="badge">model/decoder.py:45-59</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>def forward(self, target, encoded_input, target_mask, input_mask):
+    # 1. 带因果掩码的自注意力：Q K V 都来自 target
+    attention_1, _ = self.attention1(target, target, target, target_mask)
+    attention_1_norm = self.norm1(target + self.dropout(attention_1))
+
+    # 2. 交叉注意力：Q 来自解码器，K V 来自编码器
+    attention_2, attention = self.attention2(attention_1_norm, encoded_input,
+                                             encoded_input, input_mask)
+    attention_2_norm = self.norm2(attention_1_norm + self.dropout(attention_2))
+
+    # 3. 前馈网络
+    forward = self.feed_forward(attention_2_norm)
+    output = self.norm3(attention_2_norm + self.dropout(forward))
+    return output, attention</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section6">
+                    <div class="code-header" onclick="toggleSection('section6')">
+                        <h3>Linear：投影到词表维度</h3>
+                        <span class="badge">model/decoder.py:94,104</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>self.linear = nn.Linear(dim_model, tgt_vocab_size)   # 最后一层：d_model 到词表大小
+...
+output = self.linear(target)                          # 【batch, len_tgt, vocab】</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="section7">
+                    <div class="code-header" onclick="toggleSection('section7')">
+                        <h3>Softmax：图上有，代码里没有</h3>
+                        <span class="badge">model/decoder.py:103</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code># Softmax skipped : Using Cross entropy loss wherein softmax is already included
+output = self.linear(target)
+
+# 对应训练代码 model/../../train.py:71
+criterion = nn.CrossEntropyLoss(ignore_index=dict.PAD_TOKEN)</code></pre>
+                    </div>
+                    <div class="detail-card" style="margin:0;border-radius:0;border-left:none;border-right:none;border-bottom:none;">
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <label>差异说明</label>
+                                <p>结构图上 Softmax 是独立一层，但这份代码把它省掉了：CrossEntropyLoss 内部自带 log_softmax，再手动做一次会重复。所以推理时才需要自己加 softmax。</p>
+                            </div>
+                            <div class="detail-item">
+                                <label>什么时候要补回来</label>
+                                <p>训练时不用；translate.py 里做 greedy 解码时直接对 logits 取 argmax，也不需要。只有当你要输出"概率"本身时才补 softmax。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 子图 1 说明卡片 ===== -->
+            <div id="subEncoderDetails" style="display:none">
+                <h2 class="panel-title">编码器层内部</h2>
+
+                <div class="code-section" id="encSec1">
+                    <div class="code-header" onclick="toggleSection('encSec1')">
+                        <h3>输入：src 和 src_mask</h3>
+                        <span class="badge">model/encoder.py:39</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>def forward(self, src, mask):
+    # src    : 【batch, len, d_model】
+    # mask   : 【batch, 1, 1, len】，只按 key 位置屏蔽 padding</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="encSec2">
+                    <div class="code-header" onclick="toggleSection('encSec2')">
+                        <h3>多头自注意力：Q K V 同源</h3>
+                        <span class="badge">model/encoder.py:41</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention, _ = self.attention(src, src, src, mask)
+# 三个参数传的是同一个张量，所以叫"自"注意力
+# 用到的 mask 是 src_mask：只遮 padding，不遮未来</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="encSec3">
+                    <div class="code-header" onclick="toggleSection('encSec3')">
+                        <h3>残差相加 加 层归一化 norm1</h3>
+                        <span class="badge">model/encoder.py:43</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention_norm = self.norm1(src + self.dropout(attention))
+# 形状必须一致才能相加：src 和 attention 都是【batch, len, d_model】</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="encSec4">
+                    <div class="code-header" onclick="toggleSection('encSec4')">
+                        <h3>前馈网络 FFN</h3>
+                        <span class="badge">model/encoder.py:98-104</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>self.ff_layer = nn.Sequential(
+    nn.Linear(hidden_size, ff_size),   # 升维：d_model 到 ff_size
+    nn.ReLU(),
+    nn.Dropout(dropout),
+    nn.Linear(ff_size, hidden_size)    # 降回：ff_size 到 d_model
+)
+# 逐位置独立作用，不跨位置混信息</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="encSec5">
+                    <div class="code-header" onclick="toggleSection('encSec5')">
+                        <h3>残差相加 加 层归一化 norm2 与输出</h3>
+                        <span class="badge">model/encoder.py:46-47</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>output = self.norm2(attention_norm + self.dropout(forward))
+return output
+# 输出【batch, len, d_model】，与输入同形，下一层接着吃</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 子图 2 说明卡片 ===== -->
+            <div id="subDecoderDetails" style="display:none">
+                <h2 class="panel-title">解码器层内部：三种注意力对照</h2>
+
+                <div class="detail-card">
+                    <h4>三种注意力的区别只有两处：Q K V 来自谁、mask 是什么</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>普通自注意力 编码器</label>
+                            <p>Q K V 全部来自 src；mask 是 src_mask，只遮 padding。代码：self.attention(src, src, src, mask)</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>带因果掩码的自注意力 解码器第一子层</label>
+                            <p>Q K V 全部来自 target；mask 是 target_mask，等于 padding 与 下三角 的与，既遮填充又遮未来。代码：self.attention1(target, target, target, target_mask)</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>交叉注意力 解码器第二子层</label>
+                            <p>Q 来自解码器状态，K V 来自编码器输出；mask 是 input_mask，只遮 padding，不遮未来。代码：self.attention2(attention_1_norm, encoded_input, encoded_input, input_mask)</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>为什么能共用一个类</label>
+                            <p>这个类的接口是 Q K V mask 到 output，它不关心 Q 从哪来。角色由输入来源决定，不由算子内部决定。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="code-section" id="decSec1">
+                    <div class="code-header" onclick="toggleSection('decSec1')">
+                        <h3>输入 target 和 encoded_input</h3>
+                        <span class="badge">model/decoder.py:45</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>def forward(self, target, encoded_input, target_mask, input_mask):
+    # target         : 解码器自己的输入（shifted right 的译文）
+    # encoded_input  : 编码器输出，只用于交叉注意力的 K 和 V</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="decSec2">
+                    <div class="code-header" onclick="toggleSection('decSec2')">
+                        <h3>带掩码的自注意力（因果掩码）</h3>
+                        <span class="badge">model/decoder.py:47</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention_1, _ = self.attention1(target, target, target, target_mask)
+# target_mask 是 padding mask 与 下三角 的与
+# 下三角保证位置 i 只能看到 0 到 i，看不到未来</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="decSec3">
+                    <div class="code-header" onclick="toggleSection('decSec3')">
+                        <h3>交叉注意力</h3>
+                        <span class="badge">model/decoder.py:51</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention_2, attention = self.attention2(attention_1_norm, encoded_input,
+                                         encoded_input, input_mask)
+# 第二个和第三个参数都是 encoded_input：编码器输出同时当 K 和 V
+# input_mask 是源端 padding mask，形状【batch, 1, 1, len_src】，直接广播到【batch, H, len_tgt, len_src】</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="decSec4">
+                    <div class="code-header" onclick="toggleSection('decSec4')">
+                        <h3>前馈网络</h3>
+                        <span class="badge">model/decoder.py:55</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>forward = self.feed_forward(attention_2_norm)
+# 与编码器里的 FFN 结构完全相同，逐位置独立作用</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="decSec5">
+                    <div class="code-header" onclick="toggleSection('decSec5')">
+                        <h3>norm3 与返回</h3>
+                        <span class="badge">model/decoder.py:57-59</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>output = self.norm3(attention_2_norm + self.dropout(forward))
+return output, attention
+# 第二个返回值是交叉注意力的权重，一直往上传给 translate.py，用于画注意力图</code></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 子图 3 说明卡片 ===== -->
+            <div id="subAttnDetails" style="display:none">
+                <h2 class="panel-title">缩放点积注意力内部：形状流转</h2>
+
+                <div class="detail-card">
+                    <h4>形状流水线（以 batch=10、len=50、d_model=128、heads=8 为例）</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>进入算子前</label>
+                            <p>【10, 50, 128】经 view 与 permute 拆头成【10, 8, 50, 16】。拆的是特征维：第 h 个头拿坐标 h 乘 16 到 h 乘 16 加 15。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>q 乘 k 的转置</label>
+                            <p>【10, 8, 50, 16】乘【10, 8, 16, 50】得到【10, 8, 50, 50】。共享维是 D_k=16，被消掉；留下两个 token 维。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>mask 后的 softmax</label>
+                            <p>被遮位置填 -1e10，softmax 后约等于 0。形状不变，每行 50 个权重和为 1。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>与 v 矩阵乘</label>
+                            <p>【10, 8, 50, 50】乘【10, 8, 50, 16】得到【10, 8, 50, 16】。这次共享维是 len_k=50，被消掉。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>拼回</label>
+                            <p>permute 加 contiguous 加 view，把 8 个 16 维拼成 128 维，回到【10, 50, 128】，再做输出投影 W_O。</p>
+                        </div>
+                        <div class="detail-item">
+                            <label>两次矩阵乘的分工</label>
+                            <p>第一次沿特征维求和，算的是谁跟谁像；第二次沿位置维求和，算的是把谁的 value 按比例取过来。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec1">
+                    <div class="code-header" onclick="toggleSection('attSec1')">
+                        <h3>输入：已拆头的 q k v</h3>
+                        <span class="badge">model/attention.py:27</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>def scaled_dot_product_attn(self, q, k, v, mask):
+    N = q.shape[0]
+    # q / k / v : 【N, H, len, D_k】，N 是批大小
+    # mask      : 【N, 1, 1, len_k】</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec2">
+                    <div class="code-header" onclick="toggleSection('attSec2')">
+                        <h3>q 乘 k 的转置 再缩放</h3>
+                        <span class="badge">model/attention.py:31-32</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>scale = (self.dim_model ** 0.5)
+temp = torch.matmul(q, k.permute(0, 1, 3, 2)) / scale
+# k 的最后两维转置，让共享维 D_k 对齐到点积位置
+# 缩放：论文用 sqrt(d_k)，这份代码用的是 sqrt(dim_model)，相差 sqrt(num_heads) 倍</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec3">
+                    <div class="code-header" onclick="toggleSection('attSec3')">
+                        <h3>按 mask 屏蔽</h3>
+                        <span class="badge">model/attention.py:34-35</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>if mask is not None:
+    temp = temp.masked_fill(mask == 0, -1e10)
+# mask 等于 0 的位置填 -1e10，softmax 后约等于 0
+# 用 -1e10 而不是负无穷，避免 exp 出现 nan</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec4">
+                    <div class="code-header" onclick="toggleSection('attSec4')">
+                        <h3>softmax 在最后一维</h3>
+                        <span class="badge">model/attention.py:37</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>softmax_out = torch.softmax(temp, dim=-1)
+# dim=-1 就是 key 那一维：每个 query 位置对所有 key 位置的权重，和为 1
+# 形状不变，仍是【N, H, len_q, len_k】</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec5">
+                    <div class="code-header" onclick="toggleSection('attSec5')">
+                        <h3>与 v 矩阵乘：加权求和</h3>
+                        <span class="badge">model/attention.py:40</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention = torch.matmul(self.dropout(softmax_out), v)
+# 【N, H, len_q, len_k】乘【N, H, len_k, D_k】得到【N, H, len_q, D_k】
+# 共享维变成 len_k，被消掉；输出是各位置 value 的加权平均</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec6">
+                    <div class="code-header" onclick="toggleSection('attSec6')">
+                        <h3>换轴 加 拼接</h3>
+                        <span class="badge">model/attention.py:42-44</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention = attention.permute(0, 2, 1, 3).contiguous()
+attention = attention.view(N, -1, self.dim_model)
+# 【N, H, len_q, D_k】换轴成【N, len_q, H, D_k】，再拼成【N, len_q, d_model】
+# contiguous 是必须的：换轴后内存不连续，无法直接 view</code></pre>
+                    </div>
+                </div>
+
+                <div class="code-section" id="attSec7">
+                    <div class="code-header" onclick="toggleSection('attSec7')">
+                        <h3>输出投影 W_O</h3>
+                        <span class="badge">model/attention.py:60</span>
+                    </div>
+                    <div class="code-content">
+                        <pre><code>attention = self.linear(attention)
+# self.linear 就是论文里的 W_O：让拼好的各头输出跨头线性混合
+# 此前的 permute 加 view 只是把各头并排接起来，头与头之间还不交流</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 动态配置 -->
+    <script>
+var CONFIG = {
+    nodeToMainSection: {
+        '输入 src': 1,
+        '词嵌入': 2,
+        '编码器层': 3,
+        '编码器输出': 4,
+        '解码器层': 5,
+        'Linear': 6,
+        'Softmax': 7
+    },
+    nodeToSubFlow: {
+        '缩放点积注意力': 'subAttn',
+        '编码器层': 'subEncoder',
+        '解码器层': 'subDecoder'
+    },
+    subNodeToSection: {
+        subEncoder: {
+            '输入 src': 'encSec1',
+            '多头自注意力': 'encSec2',
+            'norm1': 'encSec3',
+            '前馈网络': 'encSec4',
+            'norm2': 'encSec5'
+        },
+        subDecoder: {
+            '输入 target': 'decSec1',
+            '带掩码': 'decSec2',
+            '交叉注意力': 'decSec3',
+            '前馈网络': 'decSec4',
+            'norm3': 'decSec5'
+        },
+        subAttn: {
+            '输入 q k v': 'attSec1',
+            '转置': 'attSec2',
+            'mask': 'attSec3',
+            'softmax': 'attSec4',
+            '与 v 矩阵乘': 'attSec5',
+            '换轴': 'attSec6',
+            'W_O': 'attSec7'
+        }
+    },
+    allFlows: ['mainFlow', 'subEncoder', 'subDecoder', 'subAttn'],
+    allTitles: ['flowTitle', 'subEncoderTitle', 'subDecoderTitle', 'subAttnTitle'],
+    allDetails: ['mainDetails', 'subEncoderDetails', 'subDecoderDetails', 'subAttnDetails'],
+    subTitles: {
+        'subEncoder': '编码器层内部（TransformerEncoderLayer）',
+        'subDecoder': '解码器层内部（三种注意力的分工）',
+        'subAttn': '缩放点积注意力内部（形状流转）'
+    },
+    subFlowDetails: {
+        'subEncoder': 'subEncoderDetails',
+        'subDecoder': 'subDecoderDetails',
+        'subAttn': 'subAttnDetails'
+    },
+    mainTitle: '总览：从 src 到输出概率'
+};
+    </script>
+    <script src="assets/flowchart.js"></script>
+</body>
+</html>

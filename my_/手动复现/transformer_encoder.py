@@ -59,7 +59,7 @@ class MultiHeadAttention(nn.Module):
 
         # 开始恢复attention的形状
         # [batch_size,num_heads,len_q,head_dim]->[batch_size,len_q,num_heads,head_dim]->[batch_size,len_q,token_dim]
-        attention=attention.permute(0,2,1,3).contiguous().view(attention.shape[0], -1, self.token_dim)#调整数值内存位置
+        attention=attention.permute(0,2,1,3).contiguous().view(q.shape[0], -1, self.token_dim)#调整数值内存位置
 
         return attention
         pass
