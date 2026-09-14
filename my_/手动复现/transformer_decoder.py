@@ -17,23 +17,52 @@ class transformer_decoder_layer(nn.Module):
         self.dropout=nn.Dropout(dropout)
 
         pass
-    def forward(self,target,encoder_out,target_mask,input_mask):
+    def forward(self,target,encoder_out,target_mask,encoder_out_mask):
         """
         target_mask:自注意力用的掩码,是 padding掩码 与 下三角因果掩码 的与
                     光挡PAD不够,每个位置还必须挡住它右边的未来位置
-        input_mask :交叉注意力用的掩码,挡的是源句的padding(源句整句可见,没有因果问题)
+        encoder_out_mask :交叉注意力用的掩码,挡的是源句的padding(源句整句可见,没有因果问题)
         """
         print(f"target.shape\n{target.shape}")
         print(f"target_mask.shape\n{target_mask.shape}")
         y=self.masked_multi_head_attention(target,target,target,target_mask)
         y1=self.norm1(self.dropout(y)+target)
 
-        y2=self.multi_head_attention(y1,encoder_out,encoder_out,input_mask)
+        y2=self.multi_head_attention(y1,encoder_out,encoder_out,encoder_out_mask)
         y3=self.norm2(self.dropout(y2)+y1)
 
         y4=self.feed_forward(y3)
         y5=self.norm3(self.dropout(y4)+y3)
         return y5
+        pass
+    pass
+
+class transformer_decoder(nn.Module):
+    def __init__(self,y_vocab_size,len_q,model_dim,num_heads,ff_size,decoder_num,device,dropout):
+        super().__init__()
+        # self.transformer_decoder_layer=transformer_decoder_layer(model_dim,num_heads,ff_size,device,dropout)
+        self.embedding_positional=embedding_positional(y_vocab_size,model_dim,len_q,device,dropout)
+
+        # self.dropout=nn.Dropout(dropout)
+
+        # decoder_num_ls=nn.ModuleList()
+
+        self.transformer_decoder_num=nn.ModuleList(
+            [transformer_decoder_layer(model_dim,num_heads,ff_size,device,dropout)
+                for decoder in range(decoder_num) ]
+        )
+
+        self.linear=nn.Linear(model_dim,y_vocab_size)
+
+        pass
+    def forward(self,target,encoder_out,target_mask,encoder_out_mask):
+        y=self.embedding_positional(target)
+        # y=self.dropout(y)
+        for decoder in self.transformer_decoder_num:
+            y=decoder(y,encoder_out,target_mask,encoder_out_mask)
+            pass
+        y=self.linear(y)
+        return y
         pass
     pass
 
