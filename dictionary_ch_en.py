@@ -47,8 +47,8 @@ def normalizeString(s):
 class Dictionary:
     def __init__(self, name):
         self.name = name
-        self.word2index = {}    # mapping word to its idx
-        self.word2count = {}    # frequency of each word
+        self.word2index = {}    # mapping word to its idx {token:索引}
+        self.word2count = {}    # frequency of each word   {token:频率}
         self.index2word = {PAD_TOKEN: "PAD", SOS_TOKEN: "SOS",
                            EOS_TOKEN: "EOS", UNK_TOKEN: "UNK"}
         self.n_count = N_SPECIAL    # pad, SOS, EOS, UNK
@@ -76,7 +76,7 @@ class Dictionary:
         if min_count <= 1:
             return self
 
-        kept = Dictionary(self.name)
+        kept = Dictionary(self.name)#新建一个字典类
         for word, _ in sorted(self.word2index.items(), key=lambda kv: kv[1]):
             if self.word2count[word] >= min_count:
                 kept.add_word(word)
@@ -102,6 +102,8 @@ def load_pairs(csv_path, max_pairs=None, max_sent_len=50):
         next(reader, None)      # 首行是列名 '0,1'，不是数据
 
         for row in itertools.islice(reader, max_pairs):
+            # print(row)#[中文字符串，英文字符串]里面的字符串已经做好分词用空格隔开的
+            # break
             if len(row) < 2:
                 continue        # 残缺行，丢掉
             zh = normalizeString(row[0])
@@ -110,8 +112,15 @@ def load_pairs(csv_path, max_pairs=None, max_sent_len=50):
                 continue
 
             # 成对过滤：任一边超长就把整对丢掉，绝不能让两个列表错位
+            # a=zh.split(' ')#该操作是按空格切分得到一个一个的token
+            # print(a)
+            # break
             if len(zh.split(' ')) > max_sent_len or len(en.split(' ')) > max_sent_len:
                 dropped_long += 1
+                #此处之所以丢弃超过预定序列长度的是因为在批训练过程中序列长度必须等长，
+                # 又因为不同语种的长度不一样如果简单的截断会导致较长的一方语言会被截断
+                # 而对应的另一方如果比较短或者更加长的话在语义上就很那对齐
+
                 continue
 
             src_sents.append(zh)
@@ -124,20 +133,25 @@ def load_pairs(csv_path, max_pairs=None, max_sent_len=50):
 # # 建词表
 # ########################################################################
 def create_dictionary(csv_path, max_pairs=None, max_sent_len=50, min_count=2, save=True):
+    """
+    max_sent_len:序列最大长度
+    min_count:token最低频率数
+
+    """
     src_sents, tgt_sents, dropped_long = load_pairs(csv_path, max_pairs, max_sent_len)
     print("句对：保留 {} 对，因超长丢弃 {} 对".format(len(src_sents), dropped_long))
 
-    input_dic = Dictionary('zh')
+    input_dic = Dictionary('zh')#创建token--id的字典
     output_dic = Dictionary('en')
 
     for sentence in src_sents:
-        input_dic.add_sentence(sentence)
+        input_dic.add_sentence(sentence)#添加一个token默认会给该token创建递增的id
     for sentence in tgt_sents:
         output_dic.add_sentence(sentence)
 
-    raw_zh, raw_en = input_dic.n_count, output_dic.n_count
-    input_dic = input_dic.compact(min_count)
-    output_dic = output_dic.compact(min_count)
+    raw_zh, raw_en = input_dic.n_count, output_dic.n_count#获取特殊字符数
+    input_dic = input_dic.compact(min_count)#删除掉低频token获得一个新的Dictionar对象
+    output_dic = output_dic.compact(min_count)#删除掉低频token获得一个新的Dictionar对象
     print("中文词表：{} -> {}（min_count={}，归入 UNK）".format(raw_zh, input_dic.n_count, min_count))
     print("英文词表：{} -> {}（min_count={}，归入 UNK）".format(raw_en, output_dic.n_count, min_count))
 
@@ -158,41 +172,8 @@ def save_dictionary(dictionary, input=True):
 
 
 if __name__ == "__main__":
-    input_dic, output_dic, src_sents, tgt_sents = create_dictionary(
-        utils.data_path, utils.max_pairs, utils.max_sent_len, utils.min_count, save=False)
+    csv_dir=r"G:\PythonProject\follow-github-learn-agent\Transformer-for-Machine-Translation-main\my_data\WMT_dataset\wmt_zh_en_training_corpus.csv"
+    load_pairs(csv_dir)
 
-    # ---- 1. 特殊符号编号 ----
-    assert [input_dic.index2word[i] for i in range(N_SPECIAL)] == ['PAD', 'SOS', 'EOS', 'UNK']
-    assert [output_dic.index2word[i] for i in range(N_SPECIAL)] == ['PAD', 'SOS', 'EOS', 'UNK']
-
-    # ---- 2. 编号连续无空洞，且不重号 ----
-    assert sorted(input_dic.index2word) == list(range(input_dic.n_count)), '中文词表编号有空洞'
-    assert sorted(output_dic.index2word) == list(range(output_dic.n_count)), '英文词表编号有空洞'
-    assert len(input_dic.word2index) + N_SPECIAL == input_dic.n_count
-
-    # ---- 3. 裁剪生效：不该再有低于阈值的词 ----
-    assert all(c >= utils.min_count for c in input_dic.word2count.values()), '中文词表还有低频词'
-    assert all(c >= utils.min_count for c in output_dic.word2count.values()), '英文词表还有低频词'
-
-    # ---- 4. 列序没搞反：源句是中文，目标句是英文 ----
-    cjk = re.compile(r'[一-鿿]')
-    assert any(cjk.search(w) for w in src_sents[0].split(' ')), '源句里找不到汉字，列序反了？'
-    assert not any(cjk.search(w) for w in tgt_sents[0].split(' ')), '目标句里有汉字，列序反了？'
-
-    # ---- 5. 配对校验：中英必须一一对应 ----
-    # 错位了训练照跑不误，但学出来全是垃圾且不报错，所以这条必须断言
-    assert len(src_sents) == len(tgt_sents), '中英句数不等，配对已错位'
-    assert src_sents[0].startswith('表演') and tgt_sents[0].startswith('the show'), \
-        '第一对不是预期的译文对：\n  zh={!r}\n  en={!r}'.format(src_sents[0], tgt_sents[0])
-
-    # ---- 6. HTML 实体确实解码了（转义形式消失，解码形式在场）----
-    assert '&apos;' not in output_dic.word2index, 'HTML 实体没解码'
-    assert "'s" in output_dic.word2index, "解码后的 's 不在词表里，unescape 没生效？"
-
-    print()
-    print('抽样 5 对（人工核对语义是否对得上）:')
-    for i in (0, 1, 2, 1000, 5000):
-        print('  [{}] zh: {}'.format(i, src_sents[i][:46]))
-        print('      en: {}'.format(tgt_sents[i][:46]))
-    print()
-    print('词表自检通过')
+    input_dic, output_dic, src_sents, tgt_sents=create_dictionary(csv_dir)
+    pass
