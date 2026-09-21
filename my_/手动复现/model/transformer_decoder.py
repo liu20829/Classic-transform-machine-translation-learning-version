@@ -23,8 +23,8 @@ class transformer_decoder_layer(nn.Module):
                     光挡PAD不够,每个位置还必须挡住它右边的未来位置
         encoder_out_mask :交叉注意力用的掩码,挡的是源句的padding(源句整句可见,没有因果问题)
         """
-        print(f"target.shape\n{target.shape}")
-        print(f"target_mask.shape\n{target_mask.shape}")
+        # print(f"target.shape\n{target.shape}")
+        # print(f"target_mask.shape\n{target_mask.shape}")
         y=self.masked_multi_head_attention(target,target,target,target_mask)
         y1=self.norm1(self.dropout(y)+target)
 

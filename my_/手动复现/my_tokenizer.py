@@ -20,7 +20,7 @@ def tokenize(sentence,dictionary,MAX_LENGTH=50):
     词表里查不到的词映到UNK_TOKEN
     """
     words=sentence.split(' ')#
-    print(f"tokenize传入的句子{words}")
+    # print(f"tokenize传入的句子{words}")   # 注:语料含 € 等 GBK 编不出的字符,直接 print 会 UnicodeEncodeError
     if len(words)>MAX_LENGTH:
         words=words[:MAX_LENGTH]
 
@@ -28,7 +28,7 @@ def tokenize(sentence,dictionary,MAX_LENGTH=50):
     token+=[dictionary.word2index.get(word,dict.UNK_TOKEN) for word in words]
     token.append(dict.EOS_TOKEN)
     token+=[dict.PAD_TOKEN]*(MAX_LENGTH-len(words))
-    print(len(token))
+    # print(len(token))
     return token
     pass
 
@@ -45,7 +45,7 @@ def detokenize(x,vocab):
         word=vocab.index2word[i]
         if word!='EOS' and word !='SOS' and word!='PAD':
             words.append(word)
-    print(' '.join(words))
+    # print(' '.join(words))   # 同 tokenize:原文含 GBK 编不出的字符会崩
     return ' '.join(words)
     pass
 if __name__=="__main__":

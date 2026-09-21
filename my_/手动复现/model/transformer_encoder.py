@@ -57,18 +57,18 @@ class MultiHeadAttention(nn.Module):
         sqrt_dim = self.token_dim ** 0.5
 
         # 矩阵乘法过后tmp.shape=[batch_size,num_heads,len_q,len_q]
-        print(f"k.permute(0,1,3,2).shape{k.permute(0, 1, 3, 2).shape}")
-        print(f"q.shape{q.shape}")
+        # print(f"k.permute(0,1,3,2).shape{k.permute(0, 1, 3, 2).shape}")
+        # print(f"q.shape{q.shape}")
         # q, k.permute(0, 1, 3, 2)此时的矩阵乘法就是计算q中单头token的特征
 
 
         tmp = torch.matmul(q, k.permute(0, 1, 3, 2)) / sqrt_dim
         # tmp=[batch_size, num_heads, len_q, len_q]
 
-        print(f"tmp1.shape\n{tmp.shape}")
+        # print(f"tmp1.shape\n{tmp.shape}")
         if mask is not None:
             tmp = tmp.masked_fill(mask == 0, -1e10)
-            print(f"tmp2.shape\n{tmp.shape}")
+            # print(f"tmp2.shape\n{tmp.shape}")
             pass
 
         softmax_out = torch.softmax(tmp, dim=-1)
