@@ -10,22 +10,29 @@ from tqdm import tqdm
 from torch.nn import functional
 import torch
 import sys
-
+import my_dictionary
 # model/ 里的模块之间用的是平级 import(transformer_model.py 里写的是
 # from transformer_decoder import ...),这些名字不在搜索路径上 ——
 # 它们自己是入口时才找得到,从上层跑 my_train.py 就不行。
 # 在入口处把 model/ 加进来一次即可,不用给每个模块都打补丁。
 sys.path.insert(0,os.path.join(os.path.dirname(os.path.abspath(__file__)),'model'))
 
-from transformer_model import transformer_model
+from model.transformer_model import transformer_model
 from my_dataloader import get_dataloader
 from my_dictionary import load_or_create
 
-def train_one_epoch(model,train_dataloader,batch_size,Adam):
+def train_one_epoch(model,train_dataloader,epoch_num,Adam,loss_function,clip):
     print("-"*50)
-    print(f"[train]训练开始| batch数：{len(train_dataloader)}")
+    total_batchs=len(train_dataloader)
+    # 每 1% 的 batch 报一次。用整除不用 /100：batch 数一旦不是 100 的倍数，
+    # batch_idx % 19.99 永远不等于 0，会变成只在第 0 个 batch 打一条就再不吭声
+    report_every=max(total_batchs//5,1)
+    print(f"[train] epoch {epoch_num+1} 开始 | batch数：{total_batchs} | 每 {report_every} 个 batch 报一次")
     model.train()
-    runing_loss,runing_acc,total=0.0,0.0,0
+    epoch_loss=0.0      # 累加每个 batch 的平均 loss
+    epoch_correct=0     # 累加命中的非 PAD 位置数
+    epoch_tokens=0      # 累加参与计数的非 PAD 位置数
+    # with tqdm(train_dataloader,desc=f"epoch:[{epoch_num+1}]",unit='batchs') as dataloader:
     for batch_idx,batch in enumerate(train_dataloader):
         # batch=[{sec:[],tgt:[]},{src:[],tgt:[]}]长度等于batch_size
         # 我们要构造的是
@@ -33,23 +40,69 @@ def train_one_epoch(model,train_dataloader,batch_size,Adam):
         # target=(batch_size,target)
         input=[]
         target=[]
+        batch_size=len(batch)
+        # print(batch_size)
         for example in batch:
-            input.append(example.get("src"))
-            target.append(example.get('tgt'))
+            # print(example)#{sec:[],tgt:[]}
+            input.append(torch.unsqueeze(torch.tensor(example.get("src")).type(torch.int64),dim=0))
+
+
+            target.append(torch.unsqueeze(torch.tensor(example.get('tgt')).type(torch.int64),dim=0))
+            # break
             pass
+        input=torch.cat(input,dim=0).to(device)#(batch_size,seq_len)
+        # print(input)
 
-        break
+        target=torch.cat(target,dim=0).to(device)#(batch_size,seq_len)
+
+        y_p=model(input,target[:,:-1])#target[:,:-1]删掉最后以为构成因果预测掩码
+        # print(y_p.shape)#(batch_size,seq_len,tgt_vocab)
+
+        y_p=y_p.contiguous().view(-1,y_p.shape[-1])#(batch_size*seq_len,tgt_vocab)
+
+
+        target=target[:,1:].contiguous().view(-1)#(batch_size*seq_len,)给展成一维
+        Adam.zero_grad()  # 清掉上一轮的梯度
+        loss=loss_function(y_p,target)
+        loss.backward()  # 算这一轮的梯度
+        nn.utils.clip_grad_norm_(model.parameters(),clip)
+        Adam.step()  # 用梯度更新参数
+
+        # ---- 统计 ----
+        # CrossEntropyLoss 默认 reduction='mean'，且已经按 ignore_index 剔掉 PAD 位置，
+        # loss.item() 本身就是"非 PAD 位置的平均"，再除 batch_size 等于平均了两遍
+        epoch_loss+=loss.item()
+
+        # 准确率跟 loss 用同一套掩码：只数非 PAD 位置，分母也用位置数，结果才是百分数。
+        # 这里的 target 上面已经被展平成 (batch_size*seq_len,)，y_p 也是，两边一一对应
+        mask=target!=loss_function.ignore_index#获取有效token索引的掩码
+        batch_correct=((y_p.argmax(-1)==target)&mask).sum().item()
+        batch_tokens=mask.sum().item()
+        epoch_correct+=batch_correct
+        epoch_tokens+=batch_tokens
+
+        if batch_idx%report_every==0:
+            print(f"batch {batch_idx:>5}/{total_batchs}  "
+                  f"loss {loss.item():6.3f}  acc {100*batch_correct/batch_tokens:5.2f}%  "
+                  f"| 累计 loss {epoch_loss/(batch_idx+1):6.3f}  "
+                  f"acc {100*epoch_correct/epoch_tokens:5.2f}%")
+        # break
+    epoch_loss/=total_batchs
+    print(f"[train] epoch {epoch_num+1} 结束 | 平均 loss {epoch_loss:.4f} | 准确率 {100*epoch_correct/epoch_tokens:.2f}%")
+    return epoch_loss
     pass
-def valid_one_epoch(model,valid_dataloader):
+def valid_one_epoch(model,train_dataloader,epoch_num,Adam,loss_function,clip):
 
     pass
-def train(model,epoch,batch_size):
-    RL = 0.01
+def train(model,epoch,batch_size,pad_index,RL,clip):
+    # RL = 0.01
     Adam = optim.Adam(model.parameters(), lr=RL)
+    # ignore_index忽略填充pad索引
+    loss_function=nn.CrossEntropyLoss(ignore_index=pad_index)
     train_dataloader,valid_dataloader,test_dataset=get_dataloader(src_tokens,tgt_tokens,batch_size)
     for epoch_i in range(epoch):
-        train_one_epoch(model,train_dataloader,batch_size,Adam)
-        valid_one_epoch(model,valid_dataloader)
+        train_one_epoch(model,train_dataloader,epoch_i,Adam,loss_function,clip)
+        valid_one_epoch(model,train_dataloader,epoch_i,Adam,loss_function,clip)
         break
         pass
     pass
@@ -57,12 +110,13 @@ def train(model,epoch,batch_size):
 if __name__=="__main__":
     import torch
     from my_tokenizer import tokenize
-
+    RL=0.01
+    clip=1.0
     # ---- 配置：自己复现就自己写全,不依赖 utils ----
     # 路径写法跟 my_dictionary.py 的 __main__ 保持一致:写死绝对路径,看得见读的是哪份文件
     data_path=r"G:\PythonProject\follow-github-learn-agent\Transformer-for-Machine-Translation-main\my_data\WMT_dataset\wmt_zh_en_training_corpus.csv"
 
-    max_pairs=200000#最多读多少行;传 None 会读完整份 6.3GB
+    max_pairs=50000#最多读多少行;传 None 会读完整份 6.3GB
     max_sent_len=50#句子最多多少 token;也决定 tokenize 后的序列长度(=它+2)
     min_count=2#出现次数低于此值的词不单独占编号,归入 UNK
     batch_size=20
@@ -111,5 +165,5 @@ if __name__=="__main__":
         device=device,
         encode_num=encoder_num).to(device)
 
-    train(model,epoch,batch_size)
+    train(model,epoch,batch_size,my_dictionary.PAD_TOKEN,RL,clip)
     pass
