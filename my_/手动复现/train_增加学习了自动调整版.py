@@ -10,6 +10,7 @@ from tqdm import tqdm
 from torch.nn import functional
 import torch
 import sys
+from torch.optim import lr_scheduler
 import my_dictionary
 # model/ 里的模块之间用的是平级 import(transformer_model.py 里写的是
 # from transformer_decoder import ...),这些名字不在搜索路径上 ——
@@ -90,8 +91,8 @@ def train_one_epoch(model,train_dataloader,epoch_num,Adam,loss_function,clip,pr_
                   f"|  {epoch_loss/(batch_idx+1):7.4f}  {100*epoch_correct/epoch_tokens:6.2f}%")
         # break
     epoch_loss/=total_batchs
-    print(f"[train] epoch {epoch_num+1} 结束 | 平均 loss {epoch_loss:.4f} | 准确率 {100*epoch_correct/epoch_tokens:.2f}%")
-    return epoch_loss
+    train_acc=epoch_correct/epoch_tokens
+    return epoch_loss,train_acc
     pass
 
 
@@ -134,19 +135,42 @@ def valid_one_epoch(model,valid_dataloader,epoch_num,loss_function,device,pr_ci)
             print(f"[valid] {batch_i:>6}/{total_batchs}  "
                   f"loss {loss.item():7.4f}  acc {100*batch_correct/batch_tokens:6.2f}%  "
                   f"|  {epoch_loss/(batch_i+1):7.4f}  {100*epoch_correct/epoch_tokens:6.2f}%")
-    print(f"[valid] epoch {epoch_num+1} 结束 | 平均 loss {epoch_loss/total_batchs:.4f} | 准确率 {100*epoch_correct/epoch_tokens:.2f}%")
+    valid_loss=epoch_loss/total_batchs
+    valid_acc=epoch_correct/epoch_tokens
+    return valid_loss,valid_acc
 
-
-def train(model,epoch,batch_size,pad_index,RL,clip,pr_ci):
+def train(model,epoch,batch_size,pad_index,RL,clip,pr_ci,LR_FACTOR,LR_PATIENCE):
     # RL = 0.01
     Adam = optim.Adam(model.parameters(), lr=RL)
+    scheduler=lr_scheduler.ReduceLROnPlateau(Adam,mode='max',factor=LR_FACTOR,patience=LR_PATIENCE)
     # ignore_index忽略填充pad索引
     loss_function=nn.CrossEntropyLoss(ignore_index=pad_index)
     train_dataloader,valid_dataloader,test_dataset=get_dataloader(src_tokens,tgt_tokens,batch_size)
+    best_val_acc=0
+
     for epoch_i in range(epoch):
-        train_one_epoch(model,train_dataloader,epoch_i,Adam,loss_function,clip,pr_ci)
-        valid_one_epoch(model,valid_dataloader,epoch_i,loss_function,device,pr_ci)
+        # 每个 epoch 开始前打一次当前学习率：scheduler 改的就是 Adam.param_groups 里的 lr，
+        # 直接读它才是优化器本轮实际要用的值，降没降一眼可见
+        print(f"[train] epoch {epoch_i+1} 开始 | 当前学习率 lr={Adam.param_groups[0]['lr']:.6g}")
+        train_loss,train_acc=train_one_epoch(model,train_dataloader,epoch_i,Adam,loss_function,clip,pr_ci)
+        valid_loss,valid_acc=valid_one_epoch(model,valid_dataloader,epoch_i,loss_function,device,pr_ci)
+        # scheduler 只吃准确率：mode='max' 盯的就是它，误喂 valid_loss 会被判成每轮都没提升，lr 会莫名连降
+        scheduler.step(valid_acc)
+        print(f"[epoch {epoch_i+1}] 汇总 | train loss {train_loss:7.4f} acc {100*train_acc:6.2f}%"
+              f" | valid loss {valid_loss:7.4f} acc {100*valid_acc:6.2f}%")
         # break
+        if valid_acc>best_val_acc:
+            best_val_acc=valid_acc
+            best_name=f"best_epoch{epoch:02d}_acc{valid_acc * 100:.2f}.pth"
+            ckpt={
+                "epoch":epoch,
+                "model_state":model.state_dict(),
+                "optimizer_state":Adam.state_dict(),
+                "val_acc":valid_acc
+            }
+            # torch.save(ckpt, os.path.join(CHECKPOINT_DIR, best_name))
+            # torch.save(ckpt, BEST_MODEL_PATH)
+            print(f"🌟 [Save] 发现更优模型: {best_name}")
         pass
     pass
 
@@ -156,6 +180,10 @@ if __name__=="__main__":
     RL=0.01
     clip=1.0
     pr_ci=5#一个epoch打印多少中间信息
+
+    # 调度器参数
+    LR_FACTOR = 0.5
+    LR_PATIENCE = 3
     # ---- 配置：自己复现就自己写全,不依赖 utils ----
     # 路径写法跟 my_dictionary.py 的 __main__ 保持一致:写死绝对路径,看得见读的是哪份文件
     data_path=r"G:\PythonProject\follow-github-learn-agent\Transformer-for-Machine-Translation-main\my_data\WMT_dataset\wmt_zh_en_training_corpus.csv"
@@ -175,7 +203,7 @@ if __name__=="__main__":
     dropout=0.15#随机杀死神经元概率
     padding_index=0#pad的编号
     device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    epoch=2
+    epoch=10
 
     # ---- 1. 词表：有缓存直接加载,没有就现建并落盘 ----
     # 缓存文件名里带着 (max_pairs, max_sent_len, min_count),
@@ -209,5 +237,5 @@ if __name__=="__main__":
         device=device,
         encode_num=encoder_num).to(device)
 
-    train(model,epoch,batch_size,my_dictionary.PAD_TOKEN,RL,clip,pr_ci)
+    train(model,epoch,batch_size,my_dictionary.PAD_TOKEN,RL,clip,pr_ci,LR_FACTOR,LR_PATIENCE)
     pass
