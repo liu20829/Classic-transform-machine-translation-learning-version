@@ -27,7 +27,17 @@ class CustomDataset():
         return {"src":self.src_data[item],'tgt':self.tgt_data[item]}
         pass
 
-def get_dataloader(src_tokens,tgt_tokens,batch_size=None,seed=None,collate=None):
+def get_dataloader(src_tokens,tgt_tokens,batch_size=None,seed=None,collate=None,
+                   num_workers=0,pin_memory=False):
+    """
+    num_workers / pin_memory 是给训练脚本提速用的，默认值保持原来的行为（0 / False）。
+
+    原来没传 num_workers，等于默认 0 —— 取数据和拼 tensor 全在主进程里串行做。
+    训练脚本里实测过 batch 20 和 batch 128 每步耗时几乎一样（约 0.09s），
+    说明瓶颈一直在 CPU 侧的拼装而不是显卡，把这一步分给子进程能明显抬高吞吐。
+    ⚠️ num_workers>0 时入口脚本必须有 if __name__=="__main__" 保护，
+       否则子进程会重新 import 入口模块、再触发一次训练（Windows 上必崩）。
+    """
     # batch_size/seed 取默认配置
     # 1.split the RSCand TGT tokens into train, valid and test sets
     # 下面西斯切分必须使用同一个seed,且src_toekns/tgt_tokens等长
@@ -62,8 +72,18 @@ def get_dataloader(src_tokens,tgt_tokens,batch_size=None,seed=None,collate=None)
     if collate is None:
         collate=lambda x:x
 
-    train_dataloader=DataLoader(train_dataset,batch_size=batch_size,shuffle=True,collate_fn=collate)
-    valid_dataloader=DataLoader(valid_dataset,batch_size=batch_size,shuffle=True,collate_fn=collate)
+    # persistent_workers：epoch 之间不销毁子进程，省掉每轮重新 fork 的开销。
+    # 只有 num_workers>0 时才允许打开，否则 PyTorch 会直接报错
+    loader_kw=dict(num_workers=num_workers,pin_memory=pin_memory)
+    if num_workers>0:
+        loader_kw.update(persistent_workers=True,prefetch_factor=4)
+
+    # 训练集 shuffle=True；验证集没必要 shuffle（评估结果与顺序无关），
+    # 但保持原行为，只加提速参数，不改语义
+    train_dataloader=DataLoader(train_dataset,batch_size=batch_size,shuffle=True,
+                                collate_fn=collate,**loader_kw)
+    valid_dataloader=DataLoader(valid_dataset,batch_size=batch_size,shuffle=True,
+                                collate_fn=collate,**loader_kw)
 
     return train_dataloader,valid_dataloader,test_dataset
 

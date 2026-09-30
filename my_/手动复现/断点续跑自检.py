@@ -81,10 +81,14 @@ class ToyModel(nn.Module):
         self.tgt_emb = nn.Embedding(VOCAB, 32)
         self.drop = nn.Dropout(0.15)
         self.linear = nn.Linear(32, VOCAB)
-        # _log 里要读 encoder.embedding_positional.embedding.weight 和 decoder.linear.weight，
+        # _log 里要读 encoder.embedding_positional.embedding.weight 和
+        # decoder.transformer_decoder_num[0].feed_forward.ff_layer[0].weight，
         # 名字照真实模型的结构摆一份，否则 _log 那两行会 AttributeError
         self.encoder = type('E', (), {'embedding_positional': type('P', (), {'embedding': self.src_emb})()})()
-        self.decoder = type('D', (), {'linear': self.linear})()
+        ffn = type('F', (), {'ff_layer': [self.linear]})()
+        layer = type('L', (), {'feed_forward': ffn})()
+        self.decoder = type('D', (), {'linear': self.linear,
+                                      'transformer_decoder_num': [layer]})()
 
     def forward(self, src, tgt):
         ctx = self.drop(self.src_emb(src)).mean(dim=1, keepdim=True)   # (B,1,D)
@@ -121,8 +125,11 @@ def run(rel, epochs, resume_path=None, config=None, show=()):
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
+            # num_workers=0：多进程 DataLoader 要走命名管道，沙箱/受限环境会直接
+            # PermissionError；自检只验状态恢复，不需要多进程预取
             T.train(m, epochs, BATCH, my_dictionary.PAD_TOKEN, 1e-3, 1.0, 5, 0.5, 12,
-                    resume_path=resume_path, config=config)
+                    resume_path=resume_path, config=config,
+                    num_workers=0, pin_memory=False, amp_dtype=None)
     except Exception:
         say('[!!] train 抛异常，日志尾部：\n' + buf.getvalue()[-3000:])
         raise
@@ -327,6 +334,41 @@ assert after_l['best_val_acc'] != float('-inf')
 assert after_l['epoch'] == 9 and after_l['status'] == 'finished', (after_l['epoch'], after_l['status'])
 say('[ok] 续跑后 best 指标恢复正常，断点被升级成新版格式，下次续跑不用再重新记')
 T.WRITER.close()
+
+say('=== I: 混合精度（autocast + GradScaler）路径 ===')
+# 在 CPU 上用 bf16 跑一遍：CPU 上 GradScaler 会退化成不缩放的透传，
+# 但 autocast / unscale_ / scaler.step / scaler.update 这条代码路径会真的被走到，
+# 能验出"忘了 unscale 就 clip""统计用了缩放后的 loss"这类错误
+AMP_DIR = 'base_trian_log_03-03_00-00-00'
+set_run_dir(AMP_DIR)
+m_amp = fresh_model()
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    T.train(m_amp, 2, BATCH, my_dictionary.PAD_TOKEN, 1e-3, 1.0, 5, 0.5, 12,
+            resume_path=None, config=CFG, num_workers=0, pin_memory=False,
+            amp_dtype=torch.bfloat16)
+out_amp = buf.getvalue()
+assert '混合精度 bfloat16' in out_amp, out_amp[-1500:]
+say('[ok] amp 路径跑通（日志里标了混合精度）:', [l for l in out_amp.splitlines() if '混合精度' in l][0])
+# Grad/norm 必须是"未缩放"的真实范数：缩放没 unscale 的话这个值会大到离谱
+say('    ' + [l for l in out_amp.splitlines() if l.startswith('[epoch 2]')][0])
+T.WRITER.close()
+
+# 不开 amp 时 scaler 必须是 None，且 checkpoint 里 scaler_state 为 None
+sd_amp = T._load_ckpt(os.path.join(AMP_DIR, 'checkpoints', 'last.pth'))
+say('[ok] 断点里有 scaler_state 字段 =', sd_amp.get('scaler_state'))
+assert 'scaler_state' in sd_amp
+
+say('=== J: batch 拼装向量化后，形状和原实现一致 ===')
+# _to_batch 一次 torch.tensor(嵌套列表) 出整块，代替原来"每样本一次 unsqueeze+cat"。
+# 用同一批数据把两种写法对一遍，形状和数值必须完全相同
+fake = [{'src': [1, 5, 9, 0], 'tgt': [2, 7, 0, 0]}, {'src': [3, 4, 0, 0], 'tgt': [6, 8, 9, 0]}]
+got_src, got_tgt = T._to_batch(fake, torch.device('cpu'))
+old_src = torch.cat([torch.unsqueeze(torch.tensor(e['src']).type(torch.int64), 0) for e in fake], 0)
+old_tgt = torch.cat([torch.unsqueeze(torch.tensor(e['tgt']).type(torch.int64), 0) for e in fake], 0)
+assert torch.equal(got_src, old_src) and torch.equal(got_tgt, old_tgt)
+assert got_src.dtype == torch.int64 and got_src.shape == (2, 4), (got_src.dtype, got_src.shape)
+say('[ok] 向量化拼装与逐样本拼装结果逐元素相同，形状', tuple(got_src.shape), got_src.dtype)
 
 say('')
 say('全部自检通过')

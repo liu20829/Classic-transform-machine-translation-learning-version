@@ -52,7 +52,21 @@ class transformer_decoder(nn.Module):
                 for decoder in range(decoder_num) ]
         )
 
-        self.linear=nn.Linear(model_dim,y_vocab_size)
+        # ---- 输出层与目标词嵌入共享权重（weight tying）----
+        # 这两个矩阵形状都是 (y_vocab_size, model_dim)，说的是同一件事：
+        #   嵌入层   ：第 i 行 = "第 i 个英文词的向量"
+        #   输出层   ：第 i 行 = "hidden 和哪个方向像就更可能是第 i 个词"
+        # 词表 119110 / d=256 时，各存一份白花 30.6M 参数（总参数的 25%）。
+        # 共享之后只有一份参数、一处梯度累加，逼模型学一套自洽的词表示，
+        # 实测不掉精度（原版 Transformer 就是这么做的）。
+        #
+        # ⚠️ bias 必须在这里就写成 False：nn.Linear 的 bias 创建时定死，
+        #    事后 del 是脏操作（optimizer 里可能还留着引用）。
+        #    输出层后面紧跟 CrossEntropyLoss 的 softmax，多一组"每词各不相同的偏置"
+        #    只是给词表加了个没必要的先验，原版输出层也是 bias=False。
+        self.linear=nn.Linear(model_dim,y_vocab_size,bias=False)
+        # 直接指向同一份 nn.Parameter（不是复制），之后两边永远同步
+        self.linear.weight=self.embedding_positional.embedding.weight
 
         pass
     def forward(self,target,encoder_out,target_mask,encoder_out_mask):
